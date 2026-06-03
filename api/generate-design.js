@@ -1,6 +1,4 @@
-const REPLICATE_API_URL = "https://api.replicate.com/v1";
-// Flux Canny Pro - orijinal fotoğrafın yapısını koruyarak yeniden tasarlar
-const MODEL_VERSION = "black-forest-labs/flux-canny-pro";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -10,73 +8,64 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
-    const apiToken = process.env.REPLICATE_API_TOKEN;
-    if (!apiToken) return res.status(500).json({ error: "Replicate API token tanımlı değil." });
+    const apiToken = process.env.GEMINI_API_KEY;
+    if (!apiToken) return res.status(500).json({ error: "Gemini API key tanımlı değil." });
 
-    const { action, id, image, roomType, style } = req.body;
+    const { image, roomType, style } = req.body;
+    if (!image) return res.status(400).json({ error: "Görsel gerekli." });
 
-    if (action === "create") {
-      if (!image) return res.status(400).json({ error: "Görsel gerekli." });
+    let roomTypeEng = "room";
+    if (roomType === "kitchen") roomTypeEng = "kitchen";
+    else if (roomType === "living_room") roomTypeEng = "living room";
+    else if (roomType === "bathroom") roomTypeEng = "bathroom";
+    else if (roomType === "bedroom") roomTypeEng = "bedroom";
 
-      let roomTypeEng = "room";
-      if (roomType === "kitchen") roomTypeEng = "kitchen";
-      else if (roomType === "living_room") roomTypeEng = "living room";
-      else if (roomType === "bathroom") roomTypeEng = "bathroom";
-      else if (roomType === "bedroom") roomTypeEng = "bedroom";
+    let styleDesc = "modern luxury";
+    if (style === "modern") styleDesc = "premium modern luxury, marble tiles, LED lighting, high-end fixtures, clean lines";
+    else if (style === "classic") styleDesc = "classic elegant, ornate details, warm tones, traditional fixtures";
+    else if (style === "industrial") styleDesc = "industrial loft, exposed concrete, metal accents, Edison lighting";
+    else if (style === "minimalist") styleDesc = "minimalist, white walls, simple clean design, natural light";
 
-      let styleDesc = "modern luxury";
-      if (style === "modern") styleDesc = "premium modern luxury, marble tiles, LED lighting, high-end fixtures, clean lines";
-      else if (style === "classic") styleDesc = "classic elegant, ornate details, warm tones, traditional fixtures";
-      else if (style === "industrial") styleDesc = "industrial loft, exposed concrete, metal accents, Edison lighting";
-      else if (style === "minimalist") styleDesc = "minimalist, white walls, simple clean design, natural light";
+    const prompt = `Transform this ${roomTypeEng} photo into a ${styleDesc} interior design renovation. Keep the same room layout and perspective. Make it photorealistic, professional architectural photography quality.`;
 
-      const prompt = `Professional interior design photo of a renovated ${roomTypeEng}, ${styleDesc}, photorealistic, architectural magazine quality, 8K, luxury renovation`;
+    const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    const mimeType = matches ? matches[1] : "image/jpeg";
+    const base64Data = matches ? matches[2] : image;
 
-      const response = await fetch(`${REPLICATE_API_URL}/models/${MODEL_VERSION}/predictions`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiToken}`,
-          "Content-Type": "application/json",
-          "Prefer": "wait"
-        },
-        body: JSON.stringify({
-          input: {
-            prompt: prompt,
-            control_image: image,
-            steps: 28,
-            guidance: 7,
-            output_format: "jpg",
-            safety_tolerance: 5
-          }
-        })
-      });
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiToken}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType, data: base64Data } }
+          ]
+        }],
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"]
+        }
+      })
+    });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        return res.status(response.status).json({ error: `Replicate API hatası: ${errText}` });
-      }
-
-      const prediction = await response.json();
-      
-      if (prediction.status === "succeeded" && prediction.output) {
-        const outputUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-        return res.status(200).json({ status: "succeeded", output: [outputUrl] });
-      }
-
-      return res.status(200).json({ id: prediction.id, status: prediction.status });
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Gemini API Error:", errText);
+      return res.status(response.status).json({ error: `Gemini API hatası: ${errText}` });
     }
 
-    if (action === "status") {
-      if (!id) return res.status(400).json({ error: "ID gerekli." });
-      const response = await fetch(`${REPLICATE_API_URL}/predictions/${id}`, {
-        headers: { "Authorization": `Bearer ${apiToken}` }
-      });
-      if (!response.ok) return res.status(response.status).json({ error: await response.text() });
-      const prediction = await response.json();
-      return res.status(200).json({ id: prediction.id, status: prediction.status, output: prediction.output, error: prediction.error });
+    const result = await response.json();
+    const parts = result.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find(p => p.inlineData);
+
+    if (!imagePart) {
+      return res.status(500).json({ error: "Görsel üretilemedi." });
     }
 
-    return res.status(400).json({ error: "Geçersiz action." });
+    return res.status(200).json({
+      status: "succeeded",
+      output: [`data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`]
+    });
 
   } catch (error) {
     return res.status(500).json({ error: error.message });
