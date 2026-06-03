@@ -1,5 +1,4 @@
 module.exports = async function handler(req, res) {
-  // CORS Ayarları
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -7,10 +6,10 @@ module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
-    const apiToken = process.env.GEMINI_API_KEY;
-    if (!apiToken) return res.status(500).json({ error: "Gemini API key tanımlı değil." });
+    const replicateToken = process.env.REPLICATE_API_TOKEN;
+    if (!replicateToken) return res.status(500).json({ error: "Replicate API token tanımlı değil." });
 
-    const { image, roomType, style } = req.body;
+    const { image, roomType } = req.body;
     if (!image) return res.status(400).json({ error: "Görsel gerekli." });
 
     let roomTypeEng = "bathroom";
@@ -18,48 +17,36 @@ module.exports = async function handler(req, res) {
     else if (roomType === "living_room") roomTypeEng = "living room";
     else if (roomType === "bedroom") roomTypeEng = "bedroom";
 
-    // Profesyonel mimari dönüşüm promptu
-    const prompt = `Transform this ${roomTypeEng} into a stunning modern luxury renovation. Keep the exact same room perspective and layout. Replace all surfaces with premium materials. Photorealistic interior design photo, 8K quality.`;
-
-    // Base64 verisini ayrıştırma
-    const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-    const mimeType = matches ? matches[1] : "image/jpeg";
-    const base64Data = matches ? matches[2] : image;
-
-    // Google Imagen API uç noktasına doğru model ve fonksiyonla istek atıyoruz
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateImages?key=${apiToken}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: prompt,
-          numberOfImages: 1,
-          outputMimeType: mimeType,
-          aspectRatio: "3:4", 
-          personGeneration: "DONT_ALLOW"
-        })
-      }
-    );
+    const response = await fetch("https://api.replicate.com/v1/predictions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Token ${replicateToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        version: "7660b4ddb8a4410dd5674c398314e3b334225be31d74d1502cf5c7b30faabb57",
+        input: {
+          image: image,
+          prompt: `Transform this ${roomTypeEng} into a stunning modern luxury renovation. Keep the exact same room perspective and layout. Replace all surfaces with premium materials. Photorealistic interior design photo, 8K quality.`,
+          structure: "canny",
+          replicate_weights: "stability-ai/sdxl",
+          prompt_strength: 0.70,
+          num_inference_steps: 30
+        }
+      })
+    });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("Imagen API Error:", errText);
       return res.status(response.status).json({ error: errText });
     }
 
-    const result = await response.json();
-    const generatedImage = result.generatedImages?.[0]?.image?.imageBytes;
+    const prediction = await response.json();
 
-    if (!generatedImage) {
-      console.error("No image in response:", JSON.stringify(result).substring(0, 500));
-      return res.status(500).json({ error: "Model görsel üretmedi." });
-    }
-
-    // Ön yüzün beklediği yanıt formatı
     return res.status(200).json({
-      status: "succeeded",
-      output: [`data:${mimeType};base64,${generatedImage}`]
+      id: prediction.id,
+      status: prediction.status,
+      output: prediction.output ? [prediction.output] : null
     });
 
   } catch (error) {
