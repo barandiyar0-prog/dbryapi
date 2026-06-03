@@ -1744,17 +1744,15 @@
             };
 
             try {
-                // 2. Replicate ile Görsel Tasarımı Oluştur
-                aiLoadingStatus.textContent = "Fotoğraf yükleniyor ve yapay zeka sunucusu başlatılıyor...";
+                // 2. Imagen 3 ile Görsel Tasarımı Oluştur
+                aiLoadingStatus.textContent = "Google Imagen 3 ile tasarım oluşturuluyor...";
                 const createResponse = await fetch('/api/generate-design', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        action: 'create',
                         image: base64Image,
                         roomType: roomType,
-                        style: style,
-                        strength: parseFloat(aiStrength.value)
+                        style: style
                     })
                 });
 
@@ -1764,75 +1762,26 @@
                     return;
                 }
 
-                const { id: predictionId } = await createResponse.json();
-                
-                // Polling döngüsü (Status sorgulama)
-                let pollInterval = 1500; // 1.5 saniyede bir sor
-                let maxAttempts = 35; // maks. 50 saniye bekle
-                let attempts = 0;
+                const { status, output, error } = await createResponse.json();
 
-                const checkStatus = async () => {
-                    attempts++;
-                    try {
-                        const statusResponse = await fetch('/api/generate-design', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                action: 'status',
-                                id: predictionId
-                            })
-                        });
+                if (status === "succeeded" && output && output[0]) {
+                    aiLoadingBox.style.display = 'none';
+                    sliderBeforeImg.src = base64Image;
 
-                        if (!statusResponse.ok) {
-                            runSimulationFallback("Durum sorgulaması başarısız oldu, simülasyona dönülüyor.");
-                            return;
-                        }
+                    sliderAfterImg.src = output[0];
+                    sliderBeforeImgBox.style.width = "50%";
+                    baHandle.style.left = "50%";
 
-                        const { status, output, error } = await statusResponse.json();
+                    // Rapor kutusunu göster ve sonucu yazdır
+                    document.getElementById('ai-report-box').style.display = 'block';
+                    const reportText = await geminiPromise;
+                    document.getElementById('ai-report-text').textContent = reportText;
 
-                        if (status === "succeeded") {
-                            aiLoadingBox.style.display = 'none';
-                            sliderBeforeImg.src = base64Image;
-                            
-                            let finalImgUrl = Array.isArray(output) ? output[0] : output;
-                            
-                            if (!finalImgUrl) {
-                                runSimulationFallback("AI görsel üretti ancak görsel adresi alınamadı.");
-                                return;
-                            }
-
-                            sliderAfterImg.src = finalImgUrl;
-                            sliderBeforeImgBox.style.width = "50%";
-                            baHandle.style.left = "50%";
-
-                            // Rapor kutusunu göster ve sonucu yazdır
-                            document.getElementById('ai-report-box').style.display = 'block';
-                            const reportText = await geminiPromise;
-                            document.getElementById('ai-report-text').textContent = reportText;
-
-                            aiSliderContainer.style.display = 'flex';
-                            initBeforeAfterSlider();
-                        } else if (status === "failed") {
-                            runSimulationFallback(`AI üretimi başarısız oldu: ${error}`);
-                        } else {
-                            if (status === "starting") {
-                                aiLoadingStatus.textContent = "Yapay zeka modeli başlatılıyor...";
-                            } else {
-                                aiLoadingStatus.textContent = "Tasarım çiziliyor ve malzemeler yerleştiriliyor...";
-                            }
-
-                            if (attempts < maxAttempts) {
-                                setTimeout(checkStatus, pollInterval);
-                            } else {
-                                runSimulationFallback("AI işlemi zaman aşımına uğradı, simülasyon moduna dönülüyor.");
-                            }
-                        }
-                    } catch (e) {
-                        runSimulationFallback(`Status Exception: ${e.message}`);
-                    }
-                };
-
-                setTimeout(checkStatus, pollInterval);
+                    aiSliderContainer.style.display = 'flex';
+                    initBeforeAfterSlider();
+                } else {
+                    runSimulationFallback(`AI üretimi başarısız oldu: ${error || "Bilinmeyen hata"}`);
+                }
 
             } catch (error) {
                 runSimulationFallback(`Request Exception: ${error.message}`);
