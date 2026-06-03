@@ -1,4 +1,4 @@
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // CORS Ayarları
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
           prompt: prompt,
           numberOfImages: 1,
           outputMimeType: mimeType,
-          aspectRatio: "3:4", // Dikey fotoğraflar için en uygun oran
+          aspectRatio: "3:4", 
           personGeneration: "DONT_ALLOW"
         })
       }
@@ -49,8 +49,6 @@ export default async function handler(req, res) {
     }
 
     const result = await response.json();
-    
-    // Gelen görsel verisini Imagen mimarisine uygun şekilde alıyoruz
     const generatedImage = result.generatedImages?.[0]?.image?.imageBytes;
 
     if (!generatedImage) {
@@ -58,7 +56,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Model görsel üretmedi." });
     }
 
-    // Ön yüzün (frontend) beklediği formata birebir sadık kalarak yanıt dönüyoruz
+    // Ön yüzün beklediği yanıt formatı
     return res.status(200).json({
       status: "succeeded",
       output: [`data:${mimeType};base64,${generatedImage}`]
@@ -67,4 +65,4 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
