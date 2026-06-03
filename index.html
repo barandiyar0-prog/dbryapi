@@ -1729,12 +1729,13 @@
             };
 
             try {
-                // 2. Imagen 3 ile Görsel Tasarımı Oluştur
-                aiLoadingStatus.textContent = "Google Imagen 3 ile tasarım oluşturuluyor...";
+                // 2. Flux Canny Pro ile Görsel Tasarımı Oluştur
+                aiLoadingStatus.textContent = "Yapay zeka tasarım oluşturuluyor...";
                 const createResponse = await fetch('/api/generate-design', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        action: 'create',
                         image: base64Image,
                         roomType: roomType,
                         style: style
@@ -1747,26 +1748,77 @@
                     return;
                 }
 
-                const { status, output, error } = await createResponse.json();
+                const createData = await createResponse.json();
 
-                if (status === "succeeded" && output && output[0]) {
+                // Direkt sonuç geldiyse
+                if (createData.status === "succeeded" && createData.output && createData.output[0]) {
                     aiLoadingBox.style.display = 'none';
                     sliderBeforeImg.src = base64Image;
-
-                    sliderAfterImg.src = output[0];
+                    sliderAfterImg.src = createData.output[0];
                     sliderBeforeImgBox.style.width = "50%";
                     baHandle.style.left = "50%";
-
-                    // Rapor kutusunu göster ve sonucu yazdır
                     document.getElementById('ai-report-box').style.display = 'block';
                     const reportText = await geminiPromise;
                     document.getElementById('ai-report-text').textContent = reportText;
-
                     aiSliderContainer.style.display = 'flex';
                     initBeforeAfterSlider();
-                } else {
-                    runSimulationFallback(`AI üretimi başarısız oldu: ${error || "Bilinmeyen hata"}`);
+                    return;
                 }
+
+                // Polling gerekiyorsa
+                const predictionId = createData.id;
+                if (!predictionId) {
+                    runSimulationFallback("Prediction ID alınamadı.");
+                    return;
+                }
+
+                let attempts = 0;
+                const maxAttempts = 40;
+                const pollInterval = 2000;
+
+                const checkStatus = async () => {
+                    attempts++;
+                    try {
+                        const statusResponse = await fetch('/api/generate-design', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'status', id: predictionId })
+                        });
+
+                        if (!statusResponse.ok) {
+                            runSimulationFallback("Durum sorgulaması başarısız.");
+                            return;
+                        }
+
+                        const { status, output, error } = await statusResponse.json();
+
+                        if (status === "succeeded" && output && output[0]) {
+                            aiLoadingBox.style.display = 'none';
+                            sliderBeforeImg.src = base64Image;
+                            sliderAfterImg.src = Array.isArray(output) ? output[0] : output;
+                            sliderBeforeImgBox.style.width = "50%";
+                            baHandle.style.left = "50%";
+                            document.getElementById('ai-report-box').style.display = 'block';
+                            const reportText = await geminiPromise;
+                            document.getElementById('ai-report-text').textContent = reportText;
+                            aiSliderContainer.style.display = 'flex';
+                            initBeforeAfterSlider();
+                        } else if (status === "failed") {
+                            runSimulationFallback(`Tasarım başarısız: ${error}`);
+                        } else {
+                            aiLoadingStatus.textContent = "Tasarım çiziliyor...";
+                            if (attempts < maxAttempts) {
+                                setTimeout(checkStatus, pollInterval);
+                            } else {
+                                runSimulationFallback("Zaman aşımı.");
+                            }
+                        }
+                    } catch (e) {
+                        runSimulationFallback(`Hata: ${e.message}`);
+                    }
+                };
+
+                setTimeout(checkStatus, pollInterval);
 
             } catch (error) {
                 runSimulationFallback(`Request Exception: ${error.message}`);
