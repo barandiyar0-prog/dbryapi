@@ -1,4 +1,4 @@
-const IMAGEN_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -20,64 +20,67 @@ export default async function handler(req, res) {
     else if (roomType === "bathroom") roomTypeEng = "bathroom";
     else if (roomType === "bedroom") roomTypeEng = "bedroom";
 
-    let styleDesc = "modern luxury style, premium materials, warm lighting";
-    if (style === "modern") styleDesc = "premium modern luxury style, clean geometric lines, high-end materials, warm architectural lighting, sophisticated contrast, photorealistic";
-    else if (style === "classic") styleDesc = "timeless classic style, elegant wall molding, marble surfaces, golden brass fixtures, warm illumination, luxury interior";
-    else if (style === "industrial") styleDesc = "loft industrial style, exposed brick, steel structures, concrete surfaces, warm edison bulb lighting";
-    else if (style === "minimalist") styleDesc = "clean minimalist style, neutral earth tones, seamless cabinets, hidden handles, bright soft light, spacious";
+    let styleDesc = "modern luxury";
+    if (style === "modern") styleDesc = "premium modern luxury with clean lines, high-end materials, warm LED lighting, marble or wood surfaces";
+    else if (style === "classic") styleDesc = "timeless classic with elegant moldings, marble surfaces, golden fixtures, warm lighting";
+    else if (style === "industrial") styleDesc = "loft industrial with exposed brick, steel structures, concrete surfaces, Edison bulb lighting";
+    else if (style === "minimalist") styleDesc = "clean minimalist with neutral tones, seamless cabinets, hidden handles, bright soft lighting";
 
-    const prompt = `A stunning ${styleDesc} interior design renovation of a ${roomTypeEng}. Professional architectural photography, 8K resolution, photorealistic, magazine quality, dramatic lighting, high-end furniture, luxury finishes.`;
+    const prompt = `Transform this ${roomTypeEng} into a stunning ${styleDesc} interior design. Keep the same room layout and dimensions but completely renovate the surfaces, materials, furniture and lighting. Make it look like a professional architectural magazine photo. Photorealistic, 8K quality.`;
 
     const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
     const mimeType = matches ? matches[1] : "image/jpeg";
     const base64Data = matches ? matches[2] : image;
 
-    const response = await fetch(`${IMAGEN_API_URL}?key=${apiToken}`, {
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiToken}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        instances: [
+        contents: [
           {
-            prompt: prompt,
-            referenceImages: [
+            parts: [
+              { text: prompt },
               {
-                referenceType: "REFERENCE_TYPE_STYLE",
-                referenceId: 1,
-                referenceImage: {
-                  bytesBase64Encoded: base64Data,
-                  mimeType: mimeType
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Data
                 }
               }
             ]
           }
         ],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: "1:1",
-          safetyFilterLevel: "block_few",
-          personGeneration: "allow_adult"
+        generationConfig: {
+          responseModalities: ["TEXT", "IMAGE"]
         }
       })
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      return res.status(response.status).json({ error: `Imagen API hatası: ${errText}` });
+      console.error("Gemini API Error:", errText);
+      return res.status(response.status).json({ error: `Gemini API hatası: ${errText}` });
     }
 
     const result = await response.json();
-    const imageData = result.predictions?.[0]?.bytesBase64Encoded;
-
-    if (!imageData) {
-      return res.status(500).json({ error: "Görsel üretilemedi." });
+    
+    // Görseli bul
+    const parts = result.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find(p => p.inlineData);
+    
+    if (!imagePart) {
+      return res.status(500).json({ error: "Görsel üretilemedi. Model görsel döndürmedi." });
     }
+
+    const imageData = imagePart.inlineData.data;
+    const imageMime = imagePart.inlineData.mimeType || "image/png";
 
     return res.status(200).json({
       status: "succeeded",
-      output: [`data:image/png;base64,${imageData}`]
+      output: [`data:${imageMime};base64,${imageData}`]
     });
 
   } catch (error) {
+    console.error("Internal Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
